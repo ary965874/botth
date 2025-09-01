@@ -1,9 +1,8 @@
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
-import pLimit from "p-limit";
 
 const BASE_URL = "https://xbaaz.com/";
-const CONCURRENCY_LIMIT = 5;
+const NUM_POSTS = 10;
 
 async function fetchHtml(url) {
   const response = await fetch(url);
@@ -32,6 +31,16 @@ async function fetchPostData(post) {
   }
 }
 
+// Utility to shuffle array and pick first n elements
+function pickRandom(arr, n) {
+  const shuffled = arr.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, n);
+}
+
 export default async function handler(req, res) {
   try {
     const homepageHtml = await fetchHtml(BASE_URL);
@@ -40,6 +49,7 @@ export default async function handler(req, res) {
     const posts = [];
     $("a.infos").each((_, el) => {
       const postUrl = $(el).attr("href");
+      if (!postUrl) return;
       const title = $(el).attr("title") || "Untitled";
       const fullUrl = postUrl.startsWith("http")
         ? postUrl
@@ -47,12 +57,11 @@ export default async function handler(req, res) {
       posts.push({ title, url: fullUrl });
     });
 
-    const limit = pLimit(CONCURRENCY_LIMIT);
+    // Pick random 10 posts
+    const selectedPosts = pickRandom(posts, Math.min(NUM_POSTS, posts.length));
 
-    // Use p-limit to limit concurrent fetches
-    const results = await Promise.all(
-      posts.map((post) => limit(() => fetchPostData(post)))
-    );
+    // Fetch post data concurrently for selected posts
+    const results = await Promise.all(selectedPosts.map(fetchPostData));
 
     const filteredResults = results.filter((x) => x !== null);
 
