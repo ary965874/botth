@@ -3,50 +3,55 @@ import * as cheerio from "cheerio";
 
 const BASE_URL = "https://xbaaz.com/";
 
+async function fetchHtml(url) {
+  const response = await fetch(url);
+  return await response.text();
+}
+
+async function fetchPostData(post) {
+  try {
+    const html = await fetchHtml(post.url);
+    const $ = cheerio.load(html);
+    const videoUrl = $('meta[itemprop="contentURL"]').attr("content") || "";
+    const thumbUrl =
+      $('meta[itemprop="thumbnailUrl"]').attr("content") ||
+      "https://via.placeholder.com/320x180.png?text=Thumbnail";
+
+    return {
+      title: post.title,
+      thumbnail: thumbUrl,
+      download_links: {
+        processed_video: videoUrl,
+      },
+    };
+  } catch (err) {
+    console.error("Error fetching post:", post.url, err.message);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   try {
-    // 1. Load homepage
-    const response = await fetch(BASE_URL);
-    const html = await response.text();
-    const $ = cheerio.load(html);
+    const homepageHtml = await fetchHtml(BASE_URL);
+    const $ = cheerio.load(homepageHtml);
 
-    // 2. Collect all post links
     const posts = [];
     $("a.infos").each((_, el) => {
       const postUrl = $(el).attr("href");
       const title = $(el).attr("title") || "Untitled";
-
-      // Normalize URL
-      const fullUrl = postUrl.startsWith("http") ? postUrl : BASE_URL + postUrl.replace(/^\//, "");
+      const fullUrl = postUrl.startsWith("http")
+        ? postUrl
+        : BASE_URL + postUrl.replace(/^\//, "");
       posts.push({ title, url: fullUrl });
     });
 
-    // 3. Fetch each post page for video + thumbnail
-    const results = [];
-    for (const post of posts) {
-      try {
-        const resp = await fetch(post.url);
-        const postHtml = await resp.text();
-        const $$ = cheerio.load(postHtml);
+    // Fetch all post pages concurrently
+    const results = await Promise.all(posts.map(fetchPostData));
 
-        const videoUrl = $$('meta[itemprop="contentURL"]').attr("content") || "";
-        const thumbUrl =
-          $$('meta[itemprop="thumbnailUrl"]').attr("content") ||
-          "https://via.placeholder.com/320x180.png?text=Thumbnail";
+    // Filter out null results
+    const filteredResults = results.filter((x) => x !== null);
 
-        results.push({
-          title: post.title,
-          thumbnail: thumbUrl,
-          download_links: {
-            processed_video: videoUrl
-          }
-        });
-      } catch (err) {
-        console.error("Error fetching post:", post.url, err.message);
-      }
-    }
-
-    return res.status(200).json(results);
+    return res.status(200).json(filteredResults);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
