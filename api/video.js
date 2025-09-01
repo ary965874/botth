@@ -1,7 +1,9 @@
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
+import pLimit from "p-limit";
 
 const BASE_URL = "https://xbaaz.com/";
+const CONCURRENCY_LIMIT = 5;
 
 async function fetchHtml(url) {
   const response = await fetch(url);
@@ -45,10 +47,13 @@ export default async function handler(req, res) {
       posts.push({ title, url: fullUrl });
     });
 
-    // Fetch all post pages concurrently
-    const results = await Promise.all(posts.map(fetchPostData));
+    const limit = pLimit(CONCURRENCY_LIMIT);
 
-    // Filter out null results
+    // Use p-limit to limit concurrent fetches
+    const results = await Promise.all(
+      posts.map((post) => limit(() => fetchPostData(post)))
+    );
+
     const filteredResults = results.filter((x) => x !== null);
 
     return res.status(200).json(filteredResults);
